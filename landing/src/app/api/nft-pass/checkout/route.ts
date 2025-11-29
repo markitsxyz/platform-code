@@ -46,16 +46,6 @@ export type PostError = {
   error: string;
 }
 
-export type AddSignaturesRequest = {
-  account: string;
-  signedTransaction: string; // Base64 encoded transaction signed by user (final signature)
-}
-
-export type AddSignaturesResponse = {
-  fullySignedTransaction: string; // Base64 encoded transaction with all signatures (ready to send)
-  message: string;
-}
-
 export async function GET() {
   const response: GetResponse = {
     label: "markits Platform",
@@ -104,6 +94,13 @@ async function createNFTTransaction(account: PublicKey): Promise<PostResponse> {
   const mintSeed = account.toBytes();
   const mintKeypair = Keypair.fromSeed(mintSeed.slice(0, 32));
   console.log('NFT Mint address (deterministic):', mintKeypair.publicKey.toString());
+
+  // Check if the mint account already exists (user already has an NFT pass)
+  const mintAccountInfo = await connection.getAccountInfo(mintKeypair.publicKey);
+  if (mintAccountInfo) {
+    console.log('Mint account already exists - user may already have an NFT pass');
+    throw new Error('You already have an NFT Pass. The mint account for your wallet already exists.');
+  }
 
   // Get USDC mint info first
   const { decimals } = await getMint(connection, USDC_ADDRESS);
@@ -378,65 +375,12 @@ async function createNFTTransaction(account: PublicKey): Promise<PostResponse> {
   };
 }
 
-async function addUserSignature(userSignedTransactionBase64: string): Promise<AddSignaturesResponse> {
-  console.log('=== Adding Final User Signature to Partially Signed Transaction ===');
-  
-  // Deserialize the user-signed transaction (already has shop + mint signatures)
-  const userSignedTransaction = Transaction.from(Buffer.from(userSignedTransactionBase64, 'base64'));
-  
-  console.log('User-signed transaction details:');
-  console.log('- Fee payer:', userSignedTransaction.feePayer?.toString());
-  console.log('- Instructions:', userSignedTransaction.instructions.length);
-  
-  // Check which signatures are already present
-  console.log('Transaction existing signatures:');
-  userSignedTransaction.signatures.forEach((sig, index) => {
-    if (sig.signature) {
-      console.log(`- Signature ${index}: ${sig.publicKey.toString()} (present)`);
-    } else {
-      console.log(`- Signature ${index}: ${sig.publicKey.toString()} (missing)`);
-    }
-  });
-  
-  console.log('✅ Transaction fully signed and ready to send');
-  
-  // Serialize fully signed transaction
-  const fullySignedTransaction = userSignedTransaction.serialize();
-  const base64 = fullySignedTransaction.toString('base64');
-  
-  return {
-    fullySignedTransaction: base64,
-    message: 'Transaction fully signed and ready to send'
-  };
-}
-
-
 export async function POST(request: NextRequest) {
   try {
     console.log('\n=== NFT Pass Checkout API Called ===');
     const body = await request.json();
     console.log('Request body:', body);
     
-    // Check if this is a request to add signatures or create a new transaction
-    if (body.signedTransaction) {
-      // This is a request to add additional signatures to the transaction
-      console.log('Adding additional signatures to user-signed transaction');
-      const { signedTransaction } = body as AddSignaturesRequest;
-      
-      if (!signedTransaction) {
-        return NextResponse.json(
-          { error: "Signed transaction must be provided" } as PostError, 
-          { status: 400 }
-        );
-      }
-      
-      // Single transaction case
-      console.log('Processing single transaction case');
-      const signatureResult = await addUserSignature(signedTransaction);
-      return NextResponse.json(signatureResult);
-    }
-    
-    // This is a request to create a new transaction
     const { account } = body as InputData;
     
     if (!account) {
