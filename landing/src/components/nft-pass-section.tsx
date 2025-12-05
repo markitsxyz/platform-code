@@ -88,6 +88,7 @@ export function NFTPassSection() {
     }
   }, [])
 
+
   const handleMint = useCallback(async () => {
     if (!publicKey || !signTransaction) {
       setError('Please connect your wallet first')
@@ -99,8 +100,8 @@ export function NFTPassSection() {
     setSuccess(false)
 
     try {
-      // Step 1: Fetch the unsigned transactions from our checkout API
-      console.log('Step 1: Fetching unsigned transactions...')
+      // Step 1: Fetch the partially signed transaction from our checkout API
+      console.log('Step 1: Fetching partially signed transaction (shop + mint already signed)...')
       const response = await fetch('/api/nft-pass/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -117,53 +118,26 @@ export function NFTPassSection() {
         return
       }
 
-      // Step 2: Deserialize the pre-signed transaction (already signed by shop and mint)
-      console.log('Step 2: Deserializing pre-signed transaction...')
-      const preSignedTransaction = Transaction.from(Buffer.from(responseBody.transaction, 'base64'))
+      // Step 2: Deserialize the partially signed transaction
+      console.log('Step 2: Deserializing partially signed transaction...')
+      const partiallySignedTransaction = Transaction.from(Buffer.from(responseBody.transaction, 'base64'))
       
-      // Step 3: User wallet signs the pre-signed transaction
-      console.log('Step 3: User wallet signing pre-signed transaction...')
-      const userSignedTransaction = await signTransaction(preSignedTransaction)
+      // Step 3: User wallet signs the transaction (final signature)
+      console.log('Step 3: User wallet signing transaction (final signature)...')
+      const userSignedTransaction = await signTransaction(partiallySignedTransaction)
       
-      // Step 4: Send the user-signed transaction back for verification
-      console.log('Step 4: Verifying fully signed transaction...')
-      const userSignedBase64 = userSignedTransaction.serialize().toString('base64')
-      
-      const signatureResponse = await fetch('/api/nft-pass/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          account: publicKey.toBase58(),
-          signedTransaction: userSignedBase64
-        })
-      })
-
-      const signatureBody = await signatureResponse.json() as AddSignaturesResponse | PostError
-
-      if ('error' in signatureBody) {
-        const { error: signatureError } = signatureBody
-        console.error(signatureError)
-        setError(`Signature error: ${signatureError}`)
-        setLoading(false)
-        return
-      }
-
-      // Step 5: Deserialize the fully signed transaction
-      console.log('Step 5: Deserializing fully signed transaction...')
-      const fullySignedTransaction = Transaction.from(Buffer.from(signatureBody.fullySignedTransaction, 'base64'))
-      
-      // Step 6: Send the fully signed transaction
-      console.log('Step 6: Sending fully signed transaction...')
-      const signature = await connection.sendRawTransaction(fullySignedTransaction.serialize(), {
+      // Step 4: Send the transaction (USDC transfer + NFT creation)
+      console.log('Step 4: Sending transaction (USDC transfer + NFT creation)...')
+      const signature = await connection.sendRawTransaction(userSignedTransaction.serialize(), {
         skipPreflight: false,
         preflightCommitment: 'confirmed',
       })
       
-      // Step 7: Wait for confirmation
-      console.log('Step 7: Waiting for transaction confirmation...')
+      // Step 5: Wait for transaction confirmation
+      console.log('Step 5: Waiting for transaction confirmation...')
       const latestBlockhash = await connection.getLatestBlockhash()
       const confirmation = await connection.confirmTransaction({
-        signature,
+        signature: signature,
         blockhash: latestBlockhash.blockhash,
         lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
       })
